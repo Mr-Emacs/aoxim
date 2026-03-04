@@ -823,6 +823,7 @@ typedef enum {
   T_QUESTION,
   T_LSHIFT,
   T_RSHIFT,
+  T_ARROW,
   T_OPTION_PTR
 } TokType;
 
@@ -839,6 +840,8 @@ Token tok;
 
 const char *token_name(TokType t) {
   switch (t) {
+  case T_ARROW:
+    return "'=>'";
   case T_INT:
     return "integer";
   case T_DOUBLE:
@@ -1004,6 +1007,13 @@ void next_token(void) {
   if (!*src) {
     tok.type = T_EOF;
     strcpy(tok.text, "");
+    return;
+  }
+  if (*src == '=' && *(src + 1) == '>') {
+    src += 2;
+    current_loc.column += 2;
+    tok.type = T_ARROW;
+    strcpy(tok.text, "=>");
     return;
   }
   if (*src == '+' && *(src + 1) == '+') {
@@ -2061,6 +2071,24 @@ AST *parse_string_interpolation(const char *str) {
 
   return interp;
 }
+static bool is_arrow_lambda_ahead(void) {
+  const char *p = src;
+  int depth = 1;
+  while (*p && depth > 0) {
+    if (*p == '(')
+      depth++;
+    else if (*p == ')') {
+      if (--depth == 0)
+        break;
+    }
+    p++;
+  }
+  if (*p == ')')
+    p++;
+  while (*p && isspace(*p))
+    p++;
+  return p[0] == '=' && p[1] == '>';
+}
 
 AST *parse_primary(void) {
   AST *a;
@@ -2132,36 +2160,76 @@ AST *parse_primary(void) {
     return addrof;
   }
 
-  if (tok.type == T_LAMBDA) {
+  if (tok.type == T_LAMBDA || (tok.type == T_LP && is_arrow_lambda_ahead())) {
     SourceLoc lambda_loc = tok.loc;
-    next_token();
-    char **params = xmalloc(sizeof(char *) * 16);
-    size_t n = 0;
+    bool is_arrow_syntax = (tok.type == T_LP);
 
-    if (tok.type == T_IDENT) {
-      params[n++] = xstrdup(tok.text);
+    if (is_arrow_syntax) {
       next_token();
-
-      while (tok.type == T_COMMA) {
-        next_token();
-        if (tok.type != T_IDENT) {
-          error_at(tok.loc, "expected parameter name after comma");
-          break;
-        }
-        params[n++] = xstrdup(tok.text);
-        next_token();
-      }
-    }
-
-    if (tok.type != T_COLON) {
-      error_at(tok.loc, "expected ':' after lambda parameters");
-      if (tok.type != T_EOF)
-        next_token();
     } else {
       next_token();
     }
 
-    AST *body = parse_expr();
+    char **params = xmalloc(sizeof(char *) * 16);
+    size_t n = 0;
+
+    if (is_arrow_syntax) {
+      if (tok.type != T_RP) {
+        while (1) {
+          if (tok.type != T_IDENT) {
+            error_at(tok.loc, "expected parameter name");
+            break;
+          }
+          params[n++] = xstrdup(tok.text);
+          next_token();
+
+          if (tok.type == T_COMMA) {
+            next_token();
+            continue;
+          } else {
+            break;
+          }
+        }
+      }
+
+      if (!expect(T_RP)) {
+        error_at(tok.loc, "Error expected ')'");
+      }
+      next_token();
+
+      if (tok.type != T_ARROW) {
+        error_at(tok.loc, "expected '=>' after parameters");
+      } else {
+        next_token();
+      }
+    } else {
+      if (tok.type == T_IDENT) {
+        params[n++] = xstrdup(tok.text);
+        next_token();
+
+        while (tok.type == T_COMMA) {
+          next_token();
+          if (tok.type != T_IDENT) {
+            error_at(tok.loc, "expected parameter name after comma");
+            break;
+          }
+          params[n++] = xstrdup(tok.text);
+          next_token();
+        }
+      }
+
+      if (tok.type != T_COLON) {
+        error_at(tok.loc, "expected ':' after lambda parameters");
+      } else {
+        next_token();
+      }
+    }
+    AST *body;
+    if (tok.type == T_LC) {
+      body = parse_block();
+    } else {
+      body = parse_expr();
+    }
 
     AST *lambda = ast_new(A_LAMBDA);
     lambda->loc = lambda_loc;

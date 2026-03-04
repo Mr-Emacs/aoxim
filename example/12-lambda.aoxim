@@ -1,0 +1,19 @@
+f(a, b) = {
+    x = a + b
+    print((c, d) => {
+        return (x * c * d) / 200
+    }(40, 40))
+}
+
+f(20, 20)
+
+f = lambda a, b: {
+    x = a + b
+    print(lambda c, d: {
+        print("Urmom {x**2}")
+        return (x * c * d) / 200
+    }(50, 50))
+}
+
+f(30, 30)
+
